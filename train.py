@@ -36,8 +36,6 @@ def download_file(url, chunk_size=1024, progress_bar=True):
 
 def extract_tgz(fname, dest):
     # Extract the given tgz file
-    if fname.split('.')[-1] is not 'tgz':
-        return
     tar = tarfile.open(fname, "r:gz")
     tar.extractall(dest)
     tar.close()
