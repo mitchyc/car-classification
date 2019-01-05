@@ -88,43 +88,43 @@ if __name__ == '__main__':
     train_annos = scipy.io.loadmat('./data/devkit/cars_train_annos.mat')['annotations']
     classes = scipy.io.loadmat('./data/devkit/cars_meta.mat')
 
-    train_data = list()
-    train_labels = list()
-
-    tmp_dir = './tmp/'
-
-    if not os.path.isdir(tmp_dir):
-        os.mkdir('tmp')
+    train_data = None
+    train_labels = None
 
     # Load/process images in training set
-    for ann in tqdm(train_annos[0], desc='Processing training images', file=sys.stdout, unit='images'):
-        img_name = ann[5][0]
-        im = None
+    if not os.path.isfile('./data/train_data.npy') or not os.path.isfile('./data/train_labels.npy'):
+        train_data = np.memmap('./data/train_data.npy', dtype='uint8', mode='w+',
+                               shape=(len(train_annos[0]), 600, 800, 3))
+        train_labels = np.empty((len(train_annos[0]), 2, 2), dtype='uint8')
+        i = 0
+        for ann in tqdm(train_annos[0], desc='Processing training images', file=sys.stdout, unit='images'):
+            img_name = ann[5][0]
 
-        if os.path.isfile('{}{}'.format(tmp_dir, img_name)):
-            # Load processed image from tmp_dir
-            im = Image.open('{}{}'.format(tmp_dir, img_name))
-        else:
-            # Load raw image, resize and save processed image
             im = Image.open('./data/cars_train/{}'.format(img_name))
+            im = im.convert('RGB')
             im = resize_image(im)
-            im.save('{}{}'.format(tmp_dir, img_name))
 
-        # train_data.append(im)
+            train_data[i] = np.array(im)
 
-        # Convert bounding box pixel points to relative points
-        p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
-        label = get_relative_position(p1, p2, im.size)
-        if label is not None:
-            train_labels.append(label)
+            # Convert bounding box pixel points to relative points
+            p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
+            label = get_relative_position(p1, p2, im.size)
+            train_labels[i] = label
+            i += 1
 
-    train_data = np.array(train_data)
+        np.save('./data/train_labels.npy', train_labels)
+    else:
+        train_data = np.memmap('./data/train_data.npy', dtype='uint8', mode='r',
+                               shape=(len(train_annos[0]), 600, 800, 3))
+        train_labels = np.load('./data/train_labels.npy')
 
     # Add processed images to augmentation pipeline and apply operations
-    aug = Augmentor.Pipeline(tmp_dir, output_directory='aug')
+    aug = Augmentor.DataPipeline(train_data)
     aug.rotate(0.3, 8, 8)
     aug.skew_left_right(0.4, 0.3)
     aug.flip_left_right(0.5)
 
     # Save augmented images to './{tmp_dir}/aug'
-    aug.sample(100)
+    # aug.sample(100)
+
+
