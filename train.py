@@ -9,12 +9,14 @@ import scipy.io
 from PIL import Image
 from tqdm import tqdm
 
-# Training resource URL/file names
+# Training/testing resource URL/file names
 TRAIN_DATA_URL = 'http://imagenet.stanford.edu/internal/car196/cars_train.tgz'
-TRAIN_DEVKIT_URL = 'https://ai.stanford.edu/~jkrause/cars/car_devkit.tgz'
+DEVKIT_URL = 'https://ai.stanford.edu/~jkrause/cars/car_devkit.tgz'
+TEST_DATA_URL = 'http://imagenet.stanford.edu/internal/car196/cars_test.tgz'
 
 TRAIN_DATA_FILE_NAME = TRAIN_DATA_URL.split('/')[-1]
-TRAIN_DEVKIT_FILE_NAME = TRAIN_DEVKIT_URL.split('/')[-1]
+TRAIN_DEVKIT_FILE_NAME = DEVKIT_URL.split('/')[-1]
+TEST_DATA_FILE_NAME = TEST_DATA_URL.split('/')[-1]
 
 
 def download_file(url, chunk_size=1024, progress_bar=True):
@@ -70,7 +72,7 @@ if __name__ == '__main__':
         if not os.path.isfile('./data/{}'.format(TRAIN_DEVKIT_FILE_NAME)):
             # Download devkit archive
             print('Retrieving training annotations...')
-            download_file(TRAIN_DEVKIT_URL, chunk_size=32, progress_bar=False)
+            download_file(DEVKIT_URL, chunk_size=32, progress_bar=False)
         # Extract devkit training annotations
         print('Extracting annotations...')
         extract_tgz('./data/{}'.format(TRAIN_DEVKIT_FILE_NAME), './data/')
@@ -84,8 +86,18 @@ if __name__ == '__main__':
         print('Extracting images...')
         extract_tgz('./data/{}'.format(TRAIN_DATA_FILE_NAME), './data/')
 
+    if not os.path.isdir('./data/cars_test/') or not os.listdir('./data/cars_test/'):
+        if not os.path.isfile('./data/{}'.format(TEST_DATA_FILE_NAME)):
+            # Download test dataset
+            print('Retrieving test data...')
+            download_file(TEST_DATA_URL)
+        # Extract test images
+        print('Extracting images...')
+        extract_tgz('./data/{}'.format(TEST_DATA_FILE_NAME), './data/')
+
     # Load training annotations and car classes
     train_annos = scipy.io.loadmat('./data/devkit/cars_train_annos.mat')['annotations']
+    test_annos = scipy.io.loadmat('./data/devkit/cars_test_annos.mat')['annotations']
     classes = scipy.io.loadmat('./data/devkit/cars_meta.mat')
 
     train_data = None
@@ -118,6 +130,36 @@ if __name__ == '__main__':
                                shape=(len(train_annos[0]), 600, 800, 3))
         train_labels = np.load('./data/train_labels.npy')
 
+    train_data = None
+    train_labels = None
+
+    # Load/process images in test set
+    if not os.path.isfile('./data/test_data.npy') or not os.path.isfile('./data/test_labels.npy'):
+        test_data = np.memmap('./data/test_data.npy', dtype='uint8', mode='w+',
+                              shape=(len(test_annos[0]), 600, 800, 3))
+        test_labels = np.empty((len(test_annos[0]), 2, 2), dtype='uint8')
+        i = 0
+        for ann in tqdm(test_annos[0], desc='Processing test images', file=sys.stdout, unit='images'):
+            img_name = ann[4][0]
+
+            im = Image.open('./data/cars_test/{}'.format(img_name))
+            im = im.convert('RGB')
+            im = resize_image(im)
+
+            test_data[i] = np.array(im)
+
+            # Convert bounding box pixel points to relative points
+            p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
+            label = get_relative_position(p1, p2, im.size)
+            test_labels[i] = label
+            i += 1
+
+        np.save('./data/test_labels.npy', test_labels)
+    else:
+        test_data = np.memmap('./data/test_data.npy', dtype='uint8', mode='r',
+                              shape=(len(test_annos[0]), 600, 800, 3))
+        test_labels = np.load('./data/test_labels.npy')
+
     # Add processed images to augmentation pipeline and apply operations
     aug = Augmentor.DataPipeline(train_data)
     aug.rotate(0.3, 8, 8)
@@ -126,5 +168,3 @@ if __name__ == '__main__':
 
     # Save augmented images to './{tmp_dir}/aug'
     # aug.sample(100)
-
-
