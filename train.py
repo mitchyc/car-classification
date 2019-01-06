@@ -6,6 +6,7 @@ import Augmentor
 import numpy as np
 import requests
 import scipy.io
+import tensorflow as tf
 from PIL import Image
 from tqdm import tqdm
 
@@ -102,15 +103,21 @@ if __name__ == '__main__':
 
     train_data = None
     train_labels = None
+    train_boxes = None
 
     # Load/process images in training set
-    if not os.path.isfile('./data/train_data.npy') or not os.path.isfile('./data/train_labels.npy'):
-        train_data = np.memmap('./data/train_data.npy', dtype='uint8', mode='w+',
+    if not os.path.isfile('./data/train_data.npy') or not os.path.isfile('./data/train_labels.npy') \
+            or not os.path.isfile('./data/train_boxes.npy'):
+        train_data = np.memmap('./data/train_data.npy', dtype='float32', mode='w+',
                                shape=(len(train_annos[0]), 600, 800, 3))
-        train_labels = np.empty((len(train_annos[0]), 2, 2), dtype='uint8')
+        train_labels = np.empty((len(train_annos[0]),), dtype='int32')
+        train_boxes = np.empty((len(train_annos[0]), 2, 2), dtype='int32')
         i = 0
         for ann in tqdm(train_annos[0], desc='Processing training images', file=sys.stdout, unit='images'):
             img_name = ann[5][0]
+            class_no = ann[4][0]
+
+            train_labels[i] = class_no
 
             im = Image.open('./data/cars_train/{}'.format(img_name))
             im = im.convert('RGB')
@@ -120,24 +127,26 @@ if __name__ == '__main__':
 
             # Convert bounding box pixel points to relative points
             p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
-            label = get_relative_position(p1, p2, im.size)
-            train_labels[i] = label
+            box = get_relative_position(p1, p2, im.size)
+            train_boxes[i] = box
             i += 1
 
         np.save('./data/train_labels.npy', train_labels)
+        np.save('./data/train_boxes.npy', train_boxes)
     else:
-        train_data = np.memmap('./data/train_data.npy', dtype='uint8', mode='r',
+        train_data = np.memmap('./data/train_data.npy', dtype='float32', mode='r',
                                shape=(len(train_annos[0]), 600, 800, 3))
         train_labels = np.load('./data/train_labels.npy')
+        train_boxes = np.load('./data/train_boxes.npy')
 
-    train_data = None
-    train_labels = None
+    test_data = None
+    test_boxes = None
 
     # Load/process images in test set
-    if not os.path.isfile('./data/test_data.npy') or not os.path.isfile('./data/test_labels.npy'):
-        test_data = np.memmap('./data/test_data.npy', dtype='uint8', mode='w+',
+    if not os.path.isfile('./data/test_data.npy') or not os.path.isfile('./data/test_boxes.npy'):
+        test_data = np.memmap('./data/test_data.npy', dtype='float32', mode='w+',
                               shape=(len(test_annos[0]), 600, 800, 3))
-        test_labels = np.empty((len(test_annos[0]), 2, 2), dtype='uint8')
+        test_boxes = np.empty((len(test_annos[0]), 2, 2), dtype='int32')
         i = 0
         for ann in tqdm(test_annos[0], desc='Processing test images', file=sys.stdout, unit='images'):
             img_name = ann[4][0]
@@ -150,15 +159,15 @@ if __name__ == '__main__':
 
             # Convert bounding box pixel points to relative points
             p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
-            label = get_relative_position(p1, p2, im.size)
-            test_labels[i] = label
+            box = get_relative_position(p1, p2, im.size)
+            test_boxes[i] = box
             i += 1
 
-        np.save('./data/test_labels.npy', test_labels)
+        np.save('./data/test_boxes.npy', test_boxes)
     else:
-        test_data = np.memmap('./data/test_data.npy', dtype='uint8', mode='r',
+        test_data = np.memmap('./data/test_data.npy', dtype='float32', mode='r',
                               shape=(len(test_annos[0]), 600, 800, 3))
-        test_labels = np.load('./data/test_labels.npy')
+        test_boxes = np.load('./data/test_boxes.npy')
 
     # Add processed images to augmentation pipeline and apply operations
     aug = Augmentor.DataPipeline(train_data)
