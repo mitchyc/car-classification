@@ -6,24 +6,38 @@ import Augmentor
 import numpy as np
 import requests
 import scipy.io
-import tensorflow as tf
 from PIL import Image
 from tqdm import tqdm
+
+# Data/temp dirs
+DATA_DIR = 'data'
 
 # Training/testing resource URL/file names
 TRAIN_DATA_URL = 'http://imagenet.stanford.edu/internal/car196/cars_train.tgz'
 DEVKIT_URL = 'https://ai.stanford.edu/~jkrause/cars/car_devkit.tgz'
 TEST_DATA_URL = 'http://imagenet.stanford.edu/internal/car196/cars_test.tgz'
 
-TRAIN_DATA_FILE_NAME = TRAIN_DATA_URL.split('/')[-1]
-TRAIN_DEVKIT_FILE_NAME = DEVKIT_URL.split('/')[-1]
-TEST_DATA_FILE_NAME = TEST_DATA_URL.split('/')[-1]
+TRAIN_DATA_FILE_NAME = os.path.join(DATA_DIR, TRAIN_DATA_URL.split('/')[-1])
+DEVKIT_FILE_NAME = os.path.join(DATA_DIR, DEVKIT_URL.split('/')[-1])
+TEST_DATA_FILE_NAME = os.path.join(DATA_DIR, TEST_DATA_URL.split('/')[-1])
+
+TRAIN_DATA_DIR = os.path.join(DATA_DIR, 'cars_train')
+DEVKIT_DIR = os.path.join(DATA_DIR, 'devkit')
+TEST_DATA_DIR = os.path.join(DATA_DIR, 'cars_test')
+
+# Preprocessed image dirs
+TRAIN_DATA_NPY = os.path.join(DATA_DIR, 'train_data.npy')
+TRAIN_LABELS_NPY = os.path.join(DATA_DIR, 'train_labels.npy')
+TRAIN_BOXES_NPY = os.path.join(DATA_DIR, 'train_boxes.npy')
+
+TEST_DATA_NPY = os.path.join(DATA_DIR, 'test_data.npy')
+TEST_BOXES_NPY = os.path.join(DATA_DIR, 'test_boxes.npy')
 
 
 def download_file(url, chunk_size=1024, progress_bar=True):
     # Download a file from the specified URL
     fname = url.split('/')[-1]
-    fpath = './data/{}'.format(fname)
+    fpath = os.path.join(DATA_DIR, fname)
     r = requests.get(url, stream=True)
     total_size = int(r.headers["Content-Length"])
     bars = int(total_size / chunk_size)
@@ -66,52 +80,55 @@ def resize_image(im, size=(800, 600)):
 
 
 if __name__ == '__main__':
-    if not os.path.isdir('./data'):
-        os.mkdir('data')
+    if not os.path.isdir(DATA_DIR):
+        os.mkdir(DATA_DIR)
 
-    if not os.path.isdir('./data/devkit/') or not os.listdir('./data/devkit/'):
-        if not os.path.isfile('./data/{}'.format(TRAIN_DEVKIT_FILE_NAME)):
+    if not os.path.isdir(DEVKIT_DIR) or not os.listdir(DEVKIT_DIR):
+        if not os.path.isfile(DEVKIT_FILE_NAME):
             # Download devkit archive
-            print('Retrieving training annotations...')
+            print('Retrieving annotations...')
             download_file(DEVKIT_URL, chunk_size=32, progress_bar=False)
         # Extract devkit training annotations
         print('Extracting annotations...')
-        extract_tgz('./data/{}'.format(TRAIN_DEVKIT_FILE_NAME), './data/')
+        extract_tgz(DEVKIT_FILE_NAME, DATA_DIR)
 
-    if not os.path.isdir('./data/cars_train/') or not os.listdir('./data/cars_train/'):
-        if not os.path.isfile('./data/{}'.format(TRAIN_DATA_FILE_NAME)):
+    if not os.path.isdir(TRAIN_DATA_DIR) or not os.listdir(TRAIN_DATA_DIR):
+        if not os.path.isfile(TRAIN_DATA_FILE_NAME):
             # Download training dataset
             print('Retrieving training data...')
             download_file(TRAIN_DATA_URL)
         # Extract training images
         print('Extracting images...')
-        extract_tgz('./data/{}'.format(TRAIN_DATA_FILE_NAME), './data/')
+        extract_tgz(TRAIN_DATA_FILE_NAME, DATA_DIR)
 
-    if not os.path.isdir('./data/cars_test/') or not os.listdir('./data/cars_test/'):
-        if not os.path.isfile('./data/{}'.format(TEST_DATA_FILE_NAME)):
+    if not os.path.isdir(TEST_DATA_DIR) or not os.listdir(TEST_DATA_DIR):
+        if not os.path.isfile(TEST_DATA_FILE_NAME):
             # Download test dataset
             print('Retrieving test data...')
             download_file(TEST_DATA_URL)
         # Extract test images
         print('Extracting images...')
-        extract_tgz('./data/{}'.format(TEST_DATA_FILE_NAME), './data/')
+        extract_tgz(TEST_DATA_FILE_NAME, DATA_DIR)
 
     # Load training annotations and car classes
-    train_annos = scipy.io.loadmat('./data/devkit/cars_train_annos.mat')['annotations']
-    test_annos = scipy.io.loadmat('./data/devkit/cars_test_annos.mat')['annotations']
-    classes = scipy.io.loadmat('./data/devkit/cars_meta.mat')
+    train_annos = scipy.io.loadmat(os.path.join(DEVKIT_DIR, 'cars_train_annos.mat'))['annotations']
+    test_annos = scipy.io.loadmat(os.path.join(DEVKIT_DIR, 'cars_test_annos.mat'))['annotations']
+    classes = scipy.io.loadmat(os.path.join(DEVKIT_DIR, 'cars_meta.mat'))
+
+    train_image_count = len(train_annos[0])
+    test_image_count = len(test_annos[0])
 
     train_data = None
     train_labels = None
     train_boxes = None
 
     # Load/process images in training set
-    if not os.path.isfile('./data/train_data.npy') or not os.path.isfile('./data/train_labels.npy') \
-            or not os.path.isfile('./data/train_boxes.npy'):
-        train_data = np.memmap('./data/train_data.npy', dtype='float32', mode='w+',
-                               shape=(len(train_annos[0]), 600, 800, 3))
-        train_labels = np.empty((len(train_annos[0]),), dtype='int32')
-        train_boxes = np.empty((len(train_annos[0]), 2, 2), dtype='int32')
+    if not os.path.isfile(TRAIN_DATA_NPY) or not os.path.isfile(TRAIN_LABELS_NPY) \
+            or not os.path.isfile(TRAIN_BOXES_NPY):
+        train_data = np.memmap(TRAIN_DATA_NPY, dtype='float32', mode='w+',
+                               shape=(train_image_count, 600, 800, 3))
+        train_labels = np.empty((train_image_count,), dtype='int32')
+        train_boxes = np.empty((train_image_count, 2, 2), dtype='int32')
         i = 0
         for ann in tqdm(train_annos[0], desc='Processing training images', file=sys.stdout, unit='images'):
             img_name = ann[5][0]
@@ -119,7 +136,7 @@ if __name__ == '__main__':
 
             train_labels[i] = class_no
 
-            im = Image.open('./data/cars_train/{}'.format(img_name))
+            im = Image.open(os.path.join(TRAIN_DATA_DIR, img_name))
             im = im.convert('RGB')
             im = resize_image(im)
 
@@ -131,27 +148,27 @@ if __name__ == '__main__':
             train_boxes[i] = box
             i += 1
 
-        np.save('./data/train_labels.npy', train_labels)
-        np.save('./data/train_boxes.npy', train_boxes)
+        np.save(TRAIN_LABELS_NPY, train_labels)
+        np.save(TRAIN_BOXES_NPY, train_boxes)
     else:
-        train_data = np.memmap('./data/train_data.npy', dtype='float32', mode='r',
-                               shape=(len(train_annos[0]), 600, 800, 3))
-        train_labels = np.load('./data/train_labels.npy')
-        train_boxes = np.load('./data/train_boxes.npy')
+        train_data = np.memmap(TRAIN_DATA_NPY, dtype='float32', mode='r',
+                               shape=(train_image_count, 600, 800, 3))
+        train_labels = np.load(TRAIN_LABELS_NPY)
+        train_boxes = np.load(TRAIN_BOXES_NPY)
 
     test_data = None
     test_boxes = None
 
     # Load/process images in test set
-    if not os.path.isfile('./data/test_data.npy') or not os.path.isfile('./data/test_boxes.npy'):
-        test_data = np.memmap('./data/test_data.npy', dtype='float32', mode='w+',
-                              shape=(len(test_annos[0]), 600, 800, 3))
-        test_boxes = np.empty((len(test_annos[0]), 2, 2), dtype='int32')
+    if not os.path.isfile(TEST_DATA_NPY) or not os.path.isfile(TEST_BOXES_NPY):
+        test_data = np.memmap(TEST_DATA_NPY, dtype='float32', mode='w+',
+                              shape=(test_image_count, 600, 800, 3))
+        test_boxes = np.empty((test_image_count, 2, 2), dtype='int32')
         i = 0
         for ann in tqdm(test_annos[0], desc='Processing test images', file=sys.stdout, unit='images'):
             img_name = ann[4][0]
 
-            im = Image.open('./data/cars_test/{}'.format(img_name))
+            im = Image.open(os.path.join(TEST_DATA_DIR, img_name))
             im = im.convert('RGB')
             im = resize_image(im)
 
@@ -163,11 +180,11 @@ if __name__ == '__main__':
             test_boxes[i] = box
             i += 1
 
-        np.save('./data/test_boxes.npy', test_boxes)
+        np.save(TEST_BOXES_NPY, test_boxes)
     else:
-        test_data = np.memmap('./data/test_data.npy', dtype='float32', mode='r',
-                              shape=(len(test_annos[0]), 600, 800, 3))
-        test_boxes = np.load('./data/test_boxes.npy')
+        test_data = np.memmap(TEST_DATA_NPY, dtype='float32', mode='r',
+                              shape=(test_image_count, 600, 800, 3))
+        test_boxes = np.load(TEST_BOXES_NPY)
 
     # Add processed images to augmentation pipeline and apply operations
     aug = Augmentor.DataPipeline(train_data)
@@ -175,5 +192,5 @@ if __name__ == '__main__':
     aug.skew_left_right(0.4, 0.3)
     aug.flip_left_right(0.5)
 
-    # Save augmented images to './{tmp_dir}/aug'
+    # Generate augmented images
     # aug.sample(100)
