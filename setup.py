@@ -12,47 +12,39 @@ TRAIN_DATA_DIR = os.path.join(DATA_DIR, 'train')
 DEVKIT_DIR = os.path.join(DATA_DIR, 'devkit')
 TEST_DATA_DIR = os.path.join(DATA_DIR, 'test')
 
-# Raw image data
 TRAIN_CAR_DIR = os.path.join(TRAIN_DATA_DIR, 'car')
 TRAIN_NO_CAR_DIR = os.path.join(TRAIN_DATA_DIR, 'nocar')
 TEST_CAR_DIR = os.path.join(TEST_DATA_DIR, 'car')
 TEST_NO_CAR_DIR = os.path.join(TEST_DATA_DIR, 'nocar')
 
-# Preprocessed image dirs
-TRAIN_DATA_NPY_PREFIX = os.path.join(TRAIN_DATA_DIR, 'train_data')
+TRAIN_DATA_NPY = os.path.join(TRAIN_DATA_DIR, 'train_data.npy')
 TRAIN_LABELS_NPY = os.path.join(TRAIN_DATA_DIR, 'train_labels.npy')
-TRAIN_BOXES_NPY = os.path.join(TRAIN_DATA_DIR, 'train_boxes.npy')
 
-TEST_DATA_NPY_PREFIX = os.path.join(TEST_DATA_DIR, 'test_data')
+TEST_DATA_NPY = os.path.join(TEST_DATA_DIR, 'test_data.npy')
 TEST_LABELS_NPY = os.path.join(TEST_DATA_DIR, 'test_labels.npy')
-TEST_BOXES_NPY = os.path.join(TEST_DATA_DIR, 'test_boxes.npy')
-
-BATCH_SIZE = 32
 
 WIDTH = 80
 HEIGHT = 60
-CHANNELS = 3
+CHANNELS = 1
 
 
-def get_relative_position(p1, p2, size):
-    # Return the pixel percentage of the given points respective of the image size
-    return (p1[0] / size[0], p1[1] / size[1]), (p2[0] / size[0], p2[1] / size[1])
-
-
-def resize_image(im, size):
+def resize_image(im, size, points):
     # Resize an image
     # Crops and pads an image while maintaining original aspect ratio
     aspect = im.size[0] / im.size[1]
+    # x1, y1, width, height
+    points = (points[0] / im.size[0], points[1] / im.size[1],
+              (points[2] - points[0]) / im.size[0], (points[3] - points[1]) / im.size[1])
     im = im.resize((size[0], int(size[0] / aspect)), Image.ANTIALIAS)
     diff_y = size[1] - im.size[1]
     pad_y = int(diff_y / 2)
     if diff_y > 0:
-        im_pad = Image.new('RGB', size, (0, 0, 0))
+        im_pad = Image.new('L', size)
         im_pad.paste(im, (0, pad_y))
         im = im_pad
     elif diff_y < 0:
         im = im.crop((0, -pad_y, size[0], size[1] - pad_y))
-    return im
+    return im, points
 
 
 if __name__ == '__main__':
@@ -76,106 +68,64 @@ if __name__ == '__main__':
 
     # Load/process images in training set
     batch_no = 0
-    train_data = np.empty((BATCH_SIZE, HEIGHT, WIDTH, CHANNELS))
-    train_labels = np.empty((train_image_count,), dtype='int32')
-    train_boxes = np.empty((train_image_count, 2, 2), dtype='int32')
+    train_data = np.empty((train_image_count, HEIGHT, WIDTH, CHANNELS))
+    train_labels = np.zeros((train_image_count, 6), dtype='float32')
     i = 0
-    img = 0
     for ann in tqdm(train_annos[0], desc='Processing training images (car)', file=sys.stdout, unit='images'):
         im = Image.open(os.path.join(TRAIN_CAR_DIR, ann[5][0]))
-        im = im.convert('RGB')
-        im = resize_image(im, (WIDTH, HEIGHT))
+        im = im.convert('L')
+        im, points = resize_image(im, (WIDTH, HEIGHT), (ann[0][0], ann[1][0], ann[2][0], ann[3][0]))
 
-        train_data[img] = np.array(im)
-        train_labels[i] = 1
-
-        # Convert bounding box pixel points to relative points
-        p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
-        box = get_relative_position(p1, p2, im.size)
-        train_boxes[i] = box
+        train_data[i] = np.expand_dims(np.array(im), -1)
+        train_labels[i][0] = 1
+        train_labels[i][2:] = points
         i += 1
-        img += 1
-
-        if i % BATCH_SIZE == 0:
-            np.save('{}_{}.npy'.format(TRAIN_DATA_NPY_PREFIX, batch_no), train_data)
-            batch_no += 1
-            img = 0
-            train_data = np.empty((BATCH_SIZE, HEIGHT, WIDTH, CHANNELS))
 
     for no_car in tqdm(train_no_car_images, desc='Processing training images (no car)', file=sys.stdout, unit='images'):
         im = Image.open(os.path.join(TRAIN_NO_CAR_DIR, no_car))
-        im = im.convert('RGB')
-        im = resize_image(im, (WIDTH, HEIGHT))
+        im = im.convert('L')
+        im, _ = resize_image(im, (WIDTH, HEIGHT), (0, 0, 0, 0))
 
-        train_data[img] = np.array(im)
-        train_labels[i] = 0
+        train_data[i] = np.expand_dims(np.array(im), -1)
+        train_labels[i][1] = 1
 
-        # Convert bounding box pixel points to relative points
-        train_boxes[i] = ((0, 0), (0, 0))
         i += 1
-        img += 1
 
-        if i % BATCH_SIZE == 0:
-            np.save('{}_{}.npy'.format(TRAIN_DATA_NPY_PREFIX, batch_no), train_data)
-            batch_no += 1
-            img = 0
-            train_data = np.empty((BATCH_SIZE, HEIGHT, WIDTH, CHANNELS))
+    p = np.random.permutation(len(train_data))
+    train_data = train_data[p]
+    train_labels = train_labels[p]
 
-    if img > 0:
-        np.save('{}_{}.npy'.format(TRAIN_DATA_NPY_PREFIX, batch_no), train_data)
-
+    np.save(TRAIN_DATA_NPY, train_data)
     np.save(TRAIN_LABELS_NPY, train_labels)
-    np.save(TRAIN_BOXES_NPY, train_boxes)
 
     # Load/process images in test set
     batch_no = 0
-    test_data = np.empty((BATCH_SIZE, HEIGHT, WIDTH, CHANNELS))
-    test_labels = np.empty((test_image_count,), dtype='int32')
-    test_boxes = np.empty((test_image_count, 2, 2), dtype='int32')
+    test_data = np.empty((test_image_count, HEIGHT, WIDTH, CHANNELS))
+    test_labels = np.zeros((test_image_count, 6), dtype='float32')
     i = 0
-    img = 0
     for ann in tqdm(test_annos[0], desc='Processing test images (car)', file=sys.stdout, unit='images'):
         im = Image.open(os.path.join(TEST_CAR_DIR, ann[4][0]))
-        im = im.convert('RGB')
-        im = resize_image(im, (WIDTH, HEIGHT))
+        im = im.convert('L')
+        im, points = resize_image(im, (WIDTH, HEIGHT), (ann[0][0], ann[1][0], ann[2][0], ann[3][0]))
 
-        test_data[img] = np.array(im)
-        test_labels[i] = 1
-
-        # Convert bounding box pixel points to relative points
-        p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
-        box = get_relative_position(p1, p2, im.size)
-        test_boxes[i] = box
+        test_data[i] = np.expand_dims(np.array(im), -1)
+        test_labels[i][0] = 1
+        test_labels[i][2:] = points
         i += 1
-        img += 1
-
-        if i % BATCH_SIZE == 0:
-            np.save('{}_{}.npy'.format(TEST_DATA_NPY_PREFIX, batch_no), test_data)
-            batch_no += 1
-            img = 0
-            test_data = np.empty((BATCH_SIZE, HEIGHT, WIDTH, CHANNELS))
 
     for no_car in tqdm(test_no_car_images, desc='Processing test images (no car)', file=sys.stdout, unit='images'):
         im = Image.open(os.path.join(TEST_NO_CAR_DIR, no_car))
-        im = im.convert('RGB')
-        im = resize_image(im, (WIDTH, HEIGHT))
+        im = im.convert('L')
+        im, _ = resize_image(im, (WIDTH, HEIGHT), (0, 0, 0, 0))
 
-        test_data[img] = np.array(im)
-        test_labels[i] = 0
+        test_data[i] = np.expand_dims(np.array(im), -1)
+        test_labels[i][1] = 1
 
-        # Insert dummy points (no car)
-        test_boxes[i] = ((0, 0), (0, 0))
         i += 1
-        img += 1
 
-        if i % BATCH_SIZE == 0:
-            np.save('{}_{}.npy'.format(TEST_DATA_NPY_PREFIX, batch_no), test_data)
-            batch_no += 1
-            img = 0
-            test_data = np.empty((BATCH_SIZE, HEIGHT, WIDTH, CHANNELS))
+    p = np.random.permutation(len(test_data))
+    test_data = test_data[p]
+    test_labels = test_labels[p]
 
-    if img > 0:
-        np.save('{}_{}.npy'.format(TEST_DATA_NPY_PREFIX, batch_no), test_data)
-
+    np.save(TEST_DATA_NPY, test_data)
     np.save(TEST_LABELS_NPY, test_labels)
-    np.save(TEST_BOXES_NPY, test_boxes)

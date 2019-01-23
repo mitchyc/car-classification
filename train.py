@@ -1,196 +1,33 @@
 import os
-import sys
-import tarfile
 
-import Augmentor
 import numpy as np
-import requests
-import scipy.io
-from PIL import Image
-from tqdm import tqdm
+import tensorflow as tf
 
-# Data/temp dirs
 DATA_DIR = 'data'
+TRAIN_DATA_DIR = os.path.join(DATA_DIR, 'train')
+TRAIN_DATA = 'train_data.npy'
+TRAIN_LABELS = 'train_labels.npy'
+TEST_DATA_DIR = os.path.join(DATA_DIR, 'test')
+TEST_DATA = 'test_data.npy'
+TEST_LABELS = 'test_labels.npy'
 
-# Training/testing resource URL/file names
-TRAIN_DATA_URL = 'http://imagenet.stanford.edu/internal/car196/cars_train.tgz'
-DEVKIT_URL = 'https://ai.stanford.edu/~jkrause/cars/car_devkit.tgz'
-TEST_DATA_URL = 'http://imagenet.stanford.edu/internal/car196/cars_test.tgz'
-
-TRAIN_DATA_FILE_NAME = os.path.join(DATA_DIR, TRAIN_DATA_URL.split('/')[-1])
-DEVKIT_FILE_NAME = os.path.join(DATA_DIR, DEVKIT_URL.split('/')[-1])
-TEST_DATA_FILE_NAME = os.path.join(DATA_DIR, TEST_DATA_URL.split('/')[-1])
-
-TRAIN_DATA_DIR = os.path.join(DATA_DIR, 'cars_train')
-DEVKIT_DIR = os.path.join(DATA_DIR, 'devkit')
-TEST_DATA_DIR = os.path.join(DATA_DIR, 'cars_test')
-
-# Preprocessed image dirs
-TRAIN_DATA_NPY = os.path.join(DATA_DIR, 'train_data.npy')
-TRAIN_LABELS_NPY = os.path.join(DATA_DIR, 'train_labels.npy')
-TRAIN_BOXES_NPY = os.path.join(DATA_DIR, 'train_boxes.npy')
-
-TEST_DATA_NPY = os.path.join(DATA_DIR, 'test_data.npy')
-TEST_BOXES_NPY = os.path.join(DATA_DIR, 'test_boxes.npy')
-
-
-def download_file(url, chunk_size=1024, progress_bar=True):
-    # Download a file from the specified URL
-    fname = url.split('/')[-1]
-    fpath = os.path.join(DATA_DIR, fname)
-    r = requests.get(url, stream=True)
-    total_size = int(r.headers["Content-Length"])
-    bars = int(total_size / chunk_size)
-    with open(fpath, "wb") as f:
-        if progress_bar is True:
-            for chunk in tqdm(r.iter_content(chunk_size=chunk_size), total=bars, unit="KB",
-                              desc=fname, file=sys.stdout):
-                f.write(chunk)
-        else:
-            for chunk in r.iter_content(chunk_size=chunk_size):
-                f.write(chunk)
-
-
-def extract_tgz(fname, dest):
-    # Extract the given tgz file
-    tar = tarfile.open(fname, "r:gz")
-    tar.extractall(dest)
-    tar.close()
-
-
-def get_relative_position(p1, p2, size):
-    # Return the pixel percentage of the given points respective of the image size
-    return (p1[0] / size[0], p1[1] / size[1]), (p2[0] / size[0], p2[1] / size[1])
-
-
-def resize_image(im, size=(800, 600)):
-    # Resize an image (default is 800x600)
-    # Crops and pads an image while maintaining original aspect ratio
-    aspect = im.size[0] / im.size[1]
-    im = im.resize((size[0], int(size[0] / aspect)), Image.ANTIALIAS)
-    diff_y = size[1] - im.size[1]
-    pad_y = int(diff_y / 2)
-    if diff_y > 0:
-        im_pad = Image.new('RGB', size, (0, 0, 0))
-        im_pad.paste(im, (0, pad_y))
-        im = im_pad
-    elif diff_y < 0:
-        im = im.crop((0, -pad_y, size[0], size[1] - pad_y))
-    return im
+MODEL_DIR = 'model'
+MODEL_FILE = os.path.join(MODEL_DIR, 'model.h5')
 
 
 if __name__ == '__main__':
-    if not os.path.isdir(DATA_DIR):
-        os.mkdir(DATA_DIR)
+    train_data = np.load(os.path.join(TRAIN_DATA_DIR, TRAIN_DATA))
+    train_labels = np.load(os.path.join(TRAIN_DATA_DIR, TRAIN_LABELS))
 
-    if not os.path.isdir(DEVKIT_DIR) or not os.listdir(DEVKIT_DIR):
-        if not os.path.isfile(DEVKIT_FILE_NAME):
-            # Download devkit archive
-            print('Retrieving annotations...')
-            download_file(DEVKIT_URL, chunk_size=32, progress_bar=False)
-        # Extract devkit training annotations
-        print('Extracting annotations...')
-        extract_tgz(DEVKIT_FILE_NAME, DATA_DIR)
+    test_data = np.load(os.path.join(TEST_DATA_DIR, TEST_DATA))
+    test_labels = np.load(os.path.join(TEST_DATA_DIR, TEST_LABELS))
 
-    if not os.path.isdir(TRAIN_DATA_DIR) or not os.listdir(TRAIN_DATA_DIR):
-        if not os.path.isfile(TRAIN_DATA_FILE_NAME):
-            # Download training dataset
-            print('Retrieving training data...')
-            download_file(TRAIN_DATA_URL)
-        # Extract training images
-        print('Extracting images...')
-        extract_tgz(TRAIN_DATA_FILE_NAME, DATA_DIR)
+    model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.Conv2D(64, kernel_size=5, activation='relu', input_shape=(60, 80, 1)))
+    model.add(tf.keras.layers.Conv2D(32, kernel_size=5, activation='relu'))
+    model.add(tf.keras.layers.Flatten())
+    model.add(tf.keras.layers.Dense(6, activation='softmax'))
 
-    if not os.path.isdir(TEST_DATA_DIR) or not os.listdir(TEST_DATA_DIR):
-        if not os.path.isfile(TEST_DATA_FILE_NAME):
-            # Download test dataset
-            print('Retrieving test data...')
-            download_file(TEST_DATA_URL)
-        # Extract test images
-        print('Extracting images...')
-        extract_tgz(TEST_DATA_FILE_NAME, DATA_DIR)
-
-    # Load training annotations and car classes
-    train_annos = scipy.io.loadmat(os.path.join(DEVKIT_DIR, 'cars_train_annos.mat'))['annotations']
-    test_annos = scipy.io.loadmat(os.path.join(DEVKIT_DIR, 'cars_test_annos.mat'))['annotations']
-    classes = scipy.io.loadmat(os.path.join(DEVKIT_DIR, 'cars_meta.mat'))
-
-    train_image_count = len(train_annos[0])
-    test_image_count = len(test_annos[0])
-
-    train_data = None
-    train_labels = None
-    train_boxes = None
-
-    # Load/process images in training set
-    if not os.path.isfile(TRAIN_DATA_NPY) or not os.path.isfile(TRAIN_LABELS_NPY) \
-            or not os.path.isfile(TRAIN_BOXES_NPY):
-        train_data = np.memmap(TRAIN_DATA_NPY, dtype='float32', mode='w+',
-                               shape=(train_image_count, 600, 800, 3))
-        train_labels = np.empty((train_image_count,), dtype='int32')
-        train_boxes = np.empty((train_image_count, 2, 2), dtype='int32')
-        i = 0
-        for ann in tqdm(train_annos[0], desc='Processing training images', file=sys.stdout, unit='images'):
-            img_name = ann[5][0]
-            class_no = ann[4][0]
-
-            train_labels[i] = class_no
-
-            im = Image.open(os.path.join(TRAIN_DATA_DIR, img_name))
-            im = im.convert('RGB')
-            im = resize_image(im)
-
-            train_data[i] = np.array(im)
-
-            # Convert bounding box pixel points to relative points
-            p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
-            box = get_relative_position(p1, p2, im.size)
-            train_boxes[i] = box
-            i += 1
-
-        np.save(TRAIN_LABELS_NPY, train_labels)
-        np.save(TRAIN_BOXES_NPY, train_boxes)
-    else:
-        train_data = np.memmap(TRAIN_DATA_NPY, dtype='float32', mode='r',
-                               shape=(train_image_count, 600, 800, 3))
-        train_labels = np.load(TRAIN_LABELS_NPY)
-        train_boxes = np.load(TRAIN_BOXES_NPY)
-
-    test_data = None
-    test_boxes = None
-
-    # Load/process images in test set
-    if not os.path.isfile(TEST_DATA_NPY) or not os.path.isfile(TEST_BOXES_NPY):
-        test_data = np.memmap(TEST_DATA_NPY, dtype='float32', mode='w+',
-                              shape=(test_image_count, 600, 800, 3))
-        test_boxes = np.empty((test_image_count, 2, 2), dtype='int32')
-        i = 0
-        for ann in tqdm(test_annos[0], desc='Processing test images', file=sys.stdout, unit='images'):
-            img_name = ann[4][0]
-
-            im = Image.open(os.path.join(TEST_DATA_DIR, img_name))
-            im = im.convert('RGB')
-            im = resize_image(im)
-
-            test_data[i] = np.array(im)
-
-            # Convert bounding box pixel points to relative points
-            p1, p2 = (int(ann[0][0]), int(ann[1][0])), (int(ann[2][0]), int(ann[3][0]))
-            box = get_relative_position(p1, p2, im.size)
-            test_boxes[i] = box
-            i += 1
-
-        np.save(TEST_BOXES_NPY, test_boxes)
-    else:
-        test_data = np.memmap(TEST_DATA_NPY, dtype='float32', mode='r',
-                              shape=(test_image_count, 600, 800, 3))
-        test_boxes = np.load(TEST_BOXES_NPY)
-
-    # Add processed images to augmentation pipeline and apply operations
-    aug = Augmentor.DataPipeline(train_data)
-    aug.rotate(0.3, 8, 8)
-    aug.skew_left_right(0.4, 0.3)
-    aug.flip_left_right(0.5)
-
-    # Generate augmented images
-    # aug.sample(100)
+    model.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
+    model.fit(train_data, train_labels, epochs=5, validation_data=(test_data, test_labels))
+    model.save(MODEL_FILE)
