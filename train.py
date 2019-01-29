@@ -23,8 +23,8 @@ if __name__ == '__main__':
     test_labels = np.load(os.path.join(TEST_DATA_DIR, TEST_LABELS))
 
     model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.Conv2D(64, kernel_size=5, activation='relu', input_shape=(60, 80, 1)))
-    model.add(tf.keras.layers.Conv2D(32, kernel_size=5, activation='relu'))
+    model.add(tf.keras.layers.Conv2D(192, kernel_size=3, activation='relu', input_shape=(60, 80, 1)))
+    model.add(tf.keras.layers.Conv2D(256, kernel_size=7, activation='relu'))
     model.add(tf.keras.layers.Flatten())
     model.add(tf.keras.layers.Dense(6, activation='softmax'))
 

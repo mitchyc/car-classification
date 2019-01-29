@@ -27,6 +27,8 @@ WIDTH = 80
 HEIGHT = 60
 CHANNELS = 1
 
+DEBUG = 1
+
 
 def resize_image(im, size, points):
     # Resize an image
@@ -97,6 +99,9 @@ if __name__ == '__main__':
 
     np.save(TRAIN_DATA_NPY, train_data)
     np.save(TRAIN_LABELS_NPY, train_labels)
+
+    del train_data
+    del train_labels
 
     # Load/process images in test set
     batch_no = 0
